@@ -39,14 +39,20 @@ conda activate stellar
 
 Install dependencies
 ```sh
-pip install -r requirements.txt 
-
-pip install azureml-automl-core
-pip install opencv-python
+python -m pip install -U "pip<24.1"
+pip install -r requirements.txt
 ```
 
+## Setup
+Create an external directory ```<PATH TO YOUR EXTERNAL DIRECTORY>```. This is where you put the datasets and pretrained model weights.
+
+### Dataset
+Download [ImageNet-1K](https://www.kaggle.com/competitions/imagenet-object-localization-challenge/data) and store under ```<PATH TO YOUR EXTERNAL DIRECTORY>/ImageData/ImageNet```.
+
 ## Model Weights
-Pretrained odel weights will be made availabe soon.
+The pretrained STELLAR model weights will be made availabe soon.
+
+We use the pretrained MaskGIT-VQGAN provided by [TiTok](https://github.com/bytedance/1d-tokenizer/blob/main/README_TiTok.md) for image reconstruction. Please download the [model weights](https://huggingface.co/fun-research/TiTok/blob/main/maskgit-vqgan-imagenet-f16-256.bin) and save under ```<PATH TO YOUR EXTERNAL DIRECTORY>/PretrainedModels/vqgan/maskgit/```.
 
 ## Model Training
 

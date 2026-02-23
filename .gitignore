@@ -1,0 +1,12 @@
+.amltconfig
+amlt
+*.pyc
+*.egg-info
+*__pycache__/
+# local workspace configuration
+*.code-workspace
+# hydra outputs
+outputs
+.hydra
+.env
+tmp

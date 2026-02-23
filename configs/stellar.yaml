@@ -11,11 +11,10 @@ defaults:
 # Definitions sub-configs rely on. These will only work if running from amlt, override
 # on command line otherwise
 mounts:
-  external: ${oc.env:EXTERNAL}
-  output: ${oc.env:OUTPUT}
+  external: <PATH TO YOUR EXTERNAL DIRECTORY>
+  output: outputs
 project_name: stellar
-experiment_name: ${oc.env:AMLT_EXPERIMENT_NAME}
-job_name: ${oc.env:AMLT_JOB_NAME}
+job_name: stellar_train
 experiment_output_dir: ${mounts.output}/${project_name}/${job_name}
 
 datamodule:
@@ -64,9 +63,6 @@ model:
   
 loss:
   reg_coeff: 1.0
-
-evaluator:
-  save_name: "${mounts.external}/ImageData/ImageNet/output/${job_name}"
 
 olympus_checkpoint:
   load_checkpoint: False

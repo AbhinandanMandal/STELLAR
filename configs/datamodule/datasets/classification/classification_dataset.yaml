@@ -1,4 +1,4 @@
-_target_: olympus_core.core.ModuleDatasets    
+_target_: azureml.acft.image.components.olympus.core.ModuleDatasets    
 train:
   _target_: src.datasets.classification_dataset.ClassificationDataset
   _partial_: True
