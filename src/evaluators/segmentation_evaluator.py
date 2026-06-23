@@ -9,8 +9,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import jaccard_score, accuracy_score
 
-from olympus_core.evaluators.base import BaseOlympusEvaluator, CleanPredictions
-from src.models.stellar.tasks.segmentation import reshape_feature_map_for_spatial_tasks
+from azureml.acft.image.components.olympus.evaluators.base import BaseOlympusEvaluator, CleanPredictions
+from src.models.downstream.segmentation import reshape_feature_map_for_spatial_tasks
 
 
 @dataclass

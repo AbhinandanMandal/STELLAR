@@ -36,10 +36,7 @@ model:
   is_baseline: False
   vq_model: "${mounts.external}/PretrainedModels/vqgan/maskgit/maskgit-vqgan-imagenet-f16-256.bin"
   model:
-    # _target_: src.models.baseline_model.baseline_model.BaselineDINO
-    # model_name: dino-vitb16
-    # ckpt_root: "${mounts.external}/PretrainedModels/vision_models"
-    _target_: src.models.stellar.stellar_model.STELLARModel
+    _target_: src.models.stellar_model.STELLARModel
     num_sparse_tokens: 16
     num_decoder_layers: 6
     spatial_temp: 0.06

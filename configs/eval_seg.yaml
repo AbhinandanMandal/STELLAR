@@ -34,17 +34,12 @@ model:
   num_classes: 150
   freeze_model: False
   freeze_backbone: True
-  _target_: src.models.stellar.tasks.segmentation.SegmentationProbing
+  _target_: src.models.downstream.segmentation.SegmentationProbing
   feature_key: dense
   feature_dim: 768
   is_baseline: False
   model_backbone:
-########### Baseline #################
-    # _target_: src.models.baseline_model.baseline_model.BaselineMAE
-    # model_name: mae-base
-    # ckpt_root: "${mounts.external}/PretrainedModels/vision_models"
-########### STELLAR ##################
-    _target_: src.models.stellar.stellar_model.STELLARModel
+    _target_: src.models.stellar_model.STELLARModel
     num_sparse_tokens: 16
     num_decoder_layers: 6
     vq_model: "${mounts.external}/PretrainedModels/vqgan/maskgit/maskgit-vqgan-imagenet-f16-256.bin"

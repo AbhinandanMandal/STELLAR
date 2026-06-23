@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from torch.nn import functional as F
-from olympus_core.evaluators.base import BaseOlympusEvaluator, CleanPredictions
+from azureml.acft.image.components.olympus.evaluators.base import BaseOlympusEvaluator, CleanPredictions
 
 
 @dataclass

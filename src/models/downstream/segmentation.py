@@ -81,12 +81,12 @@ class SegmentationProbing(nn.Module):
                 if self.is_baseline:
                     predictions = self.model_backbone(inputs['image'])
                 else:
-                    predictions = self.model_backbone(inputs, mode="eval")["predictions"]
+                    predictions = self.model_backbone.encode(inputs)
         else:
             if self.is_baseline:
                 predictions = self.model_backbone(inputs['image'])
             else:
-                predictions = self.model_backbone(inputs, mode="eval")["predictions"]
+                predictions = self.model_backbone.encode(inputs)
 
         features = predictions[self.feature_key]
         features_2d = reshape_feature_map_for_spatial_tasks(
@@ -167,9 +167,9 @@ class MultiLayerSegmentationProbing(nn.Module):
 
         if self.freeze_backbone:
             with torch.no_grad():
-                predictions = self.model_backbone(inputs, mode="eval")["predictions"]
+                predictions = self.model_backbone.encode(inputs)
         else:
-            predictions = self.model_backbone(inputs, mode="train")["predictions"]
+            predictions = self.model_backbone.encode(inputs)
 
         features = []
         for key, proj in zip(self.feature_keys, self.feature_proj):

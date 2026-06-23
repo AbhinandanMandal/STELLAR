@@ -149,12 +149,12 @@ class ReconstructionProbing(nn.Module):
                 if self.is_baseline:
                     predictions = self.model(inputs['image'])
                 else:
-                    predictions = self.model(inputs, mode='eval')["predictions"]
+                    predictions = self.model.encode(inputs)
         else:
             if self.is_baseline:
                 predictions = self.model(inputs['image'])
             else:
-                predictions = self.model(inputs, mode='eval')["predictions"]
+                predictions = self.model.encode(inputs)
         feature = predictions[self.feature_key]
         
         decoder_output = self.forward_decoder(feature)

@@ -1,4 +1,5 @@
 # %% set up model
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -54,9 +55,13 @@ class STELLARModel(nn.Module):
         num_local_crops=8,
         # concept prediction 
         hungarian_match=True,
+        # second global view alignment (DINO-style cross-view self-distillation)
+        do_global_align=False,
         # momentum teacher parameters
         momentum_teacher=False,
         teacher_momentum=0.996,
+        teacher_momentum_final=None,            # if set, cosine-anneal momentum to this value
+        teacher_momentum_schedule_steps=None,   # total optimizer steps over which to anneal
         # other configurations
         model_checkpoint_path=None,
         vit_pretrained=None,
@@ -93,6 +98,13 @@ class STELLARModel(nn.Module):
         # momentum teacher encoder
         self.momentum_teacher = momentum_teacher
         self.teacher_momentum = teacher_momentum
+        self.teacher_momentum_base = teacher_momentum
+        self.teacher_momentum_final = teacher_momentum_final
+        self.teacher_momentum_schedule_steps = teacher_momentum_schedule_steps
+        # step counter for momentum scheduling. Non-persistent (not saved in the
+        # checkpoint) so it never breaks strict loading of released weights; on resume
+        # it is re-synced from trainer.global_step by MomentumScheduleCallback.
+        self.register_buffer('_step_counter', torch.tensor(0, dtype=torch.long), persistent=False)
         if self.momentum_teacher:
             if vit_pretrained is None:
                 self.teacher_encoder = ViTModel(encoder_config)
@@ -110,39 +122,33 @@ class STELLARModel(nn.Module):
 
         self.dense_proj = nn.Linear(self.encoder_dim, self.encoder_dim)
         self.sparse_proj = nn.Linear(self.encoder_dim, self.encoder_dim)
-        self.decoder_proj = nn.Linear(self.encoder_dim, decoder_config.hidden_size)
         self.spatial_temp = spatial_temp
 
-        if vq_model is None:
-            self.reconstruction_head = nn.ConvTranspose2d(
-                in_channels=decoder_config.hidden_size,
-                out_channels=3,
-                kernel_size=encoder_config.patch_size,
-                stride=encoder_config.patch_size,
-            )
-            self.tokenizer = None
-        else:
-            self.reconstruction_head = nn.Linear(
-                decoder_config.hidden_size, 1024)
-            self.tokenizer = PretrainedTokenizer(vq_model)
-            self.tokenizer.eval().requires_grad_(False)
+        # Decoder / reconstruction modules only exist when reconstruction is enabled,
+        # so a feature-extraction build (do_recon=False) stays encoder-only.
+        self.tokenizer = None
+        if self.do_recon:
+            self.decoder_proj = nn.Linear(self.encoder_dim, decoder_config.hidden_size)
+            if vq_model is None:
+                self.reconstruction_head = nn.ConvTranspose2d(
+                    in_channels=decoder_config.hidden_size,
+                    out_channels=3,
+                    kernel_size=encoder_config.patch_size,
+                    stride=encoder_config.patch_size,
+                )
+            else:
+                self.reconstruction_head = nn.Linear(
+                    decoder_config.hidden_size, 1024)
+                self.tokenizer = PretrainedTokenizer(vq_model)
+                self.tokenizer.eval().requires_grad_(False)
 
         self.do_clustering = do_clustering
         self.num_clusters = num_clusters
         self.do_cls = do_cls
         self.logits_temp = logits_temp
-        self.clustering_head = OnlineClustering(
-            in_dim=self.encoder_dim,
-            out_dim=num_clusters,
-            predictor_layers=predictor_layers,
-            prototype_dim=prototype_dim,
-            n_sk_iter=n_sk_iter,
-            sk_scale=sk_scale,
-            target_temp=sk_temp,
-            pred_temp=logits_temp,
-        )
-        if self.do_cls:
-            self.cls_cluster_head = OnlineClustering(
+        # Clustering heads only exist for self-supervised pretraining.
+        if self.do_clustering:
+            self.clustering_head = OnlineClustering(
                 in_dim=self.encoder_dim,
                 out_dim=num_clusters,
                 predictor_layers=predictor_layers,
@@ -152,6 +158,17 @@ class STELLARModel(nn.Module):
                 target_temp=sk_temp,
                 pred_temp=logits_temp,
             )
+            if self.do_cls:
+                self.cls_cluster_head = OnlineClustering(
+                    in_dim=self.encoder_dim,
+                    out_dim=num_clusters,
+                    predictor_layers=predictor_layers,
+                    prototype_dim=prototype_dim,
+                    n_sk_iter=n_sk_iter,
+                    sk_scale=sk_scale,
+                    target_temp=sk_temp,
+                    pred_temp=logits_temp,
+                )
 
         # EMA teacher clustering heads
         if self.momentum_teacher:
@@ -200,6 +217,8 @@ class STELLARModel(nn.Module):
         self.hungarian_match = hungarian_match
         if self.hungarian_match:
             self.matcher = MatcherSinkhorn()
+
+        self.do_global_align = do_global_align
 
         self.do_koleo = do_koleo
         if self.do_koleo:
@@ -371,10 +390,23 @@ class STELLARModel(nn.Module):
 
     @torch.no_grad()
     def update_teacher(self):
-        """Update teacher network with exponential moving average"""
+        """Update teacher network with exponential moving average.
+
+        When `teacher_momentum_final` and `teacher_momentum_schedule_steps` are set,
+        the momentum follows a cosine schedule from `teacher_momentum` (start) to
+        `teacher_momentum_final` (end) over the given number of optimizer steps.
+        """
         if not self.momentum_teacher:
             return
-        
+
+        # Cosine momentum schedule (e.g. 0.996 -> 1.0), DINO-style
+        if self.teacher_momentum_final is not None and self.teacher_momentum_schedule_steps:
+            progress = min(self._step_counter.item() / self.teacher_momentum_schedule_steps, 1.0)
+            self.teacher_momentum = self.teacher_momentum_final - (
+                self.teacher_momentum_final - self.teacher_momentum_base
+            ) * (1 + math.cos(math.pi * progress)) / 2
+            self._step_counter += 1
+
         # Update teacher encoder parameters
         for teacher_param, student_param in zip(self.teacher_encoder.parameters(), self.encoder.parameters()):
             teacher_param.data = self.teacher_momentum * teacher_param.data + (1 - self.teacher_momentum) * student_param.data
@@ -427,9 +459,20 @@ class STELLARModel(nn.Module):
         
         return cls_embed, sparse, dense
 
-    def forward(self, inputs: dict, mode: str = "train"):
-        image = inputs["image"]
-        
+    def encode(self, image):
+        """Extract STELLAR features from an image batch (inference, no decoder).
+
+        Args:
+            image: ``(B, 3, H, W)`` tensor with values in ``[0, 1]`` (ImageNet
+                normalization is applied internally), or a dict with key ``"image"``.
+        Returns:
+            dict with keys ``sparse`` (concept tokens), ``spatial`` (per-token spatial
+            maps), ``concat``, ``lowrank``, ``dense`` (patch features), ``cls`` (global
+            token) and ``peak_dist``.
+        """
+        if isinstance(image, dict):
+            image = image["image"]
+
         # encode the image
         cls_embed, sparse, dense = self.forward_image(image)
 
@@ -440,9 +483,9 @@ class STELLARModel(nn.Module):
 
         # sparse features filtered by spatial distribution
         peak_dist = spatial.detach().max(dim=1)[0]    # B x num_sparse_tokens
-        
+
         concat_feats = torch.cat([sparse, spatial.transpose(1, 2)], dim=2)
-        predictions = {
+        return {
             "sparse": sparse,
             "spatial": spatial,
             "concat": concat_feats,
@@ -451,35 +494,111 @@ class STELLARModel(nn.Module):
             "cls": cls_embed,
             "peak_dist": peak_dist,
         }
-        
-        if mode == "eval":
-            return {'predictions': predictions}
-        
+
+    def reconstruct(self, sparse, spatial=None):
+        """Decode factorized STELLAR features (sparse tokens + spatial maps) to pixels.
+
+        This is the decoder half of STELLAR: it takes the factorized representation
+        produced by :meth:`encode` and reconstructs the image. Pipeline::
+
+            sparse + spatial -> low-rank dense map (spatial @ sparse) -> ViT decoder
+                             -> reconstruction head -> (VQ tokens ->) VQGAN decoder -> pixels
+
+        Requires a model built with ``do_recon=True``. For the released ("vq") models the
+        head predicts MaskGIT-VQGAN tokens, which are decoded back to pixels by the VQGAN
+        decoder (so ``vq_model`` must be provided when building the model). A model built
+        without a tokenizer reconstructs pixels directly.
+
+        Args:
+            sparse: the factorized features. Either the dict returned by :meth:`encode`
+                (its ``sparse``/``spatial``/``lowrank`` entries are used), or the sparse
+                concept tokens ``(B, K, D)`` — in which case also pass ``spatial``.
+            spatial: per-token spatial maps ``(B, P, K)``. Required when ``sparse`` is a
+                tensor; ignored when ``sparse`` is a feature dict.
+        Returns:
+            dict with:
+              * ``reconstruction`` – ``(B, 3, H, W)`` RGB pixels in ``[0, 1]``
+                (224×224 for /16 models, 256×256 for the /14 H model);
+              * ``tokens`` – ``(B, P)`` predicted VQGAN token ids (VQ models only);
+              * ``logits`` – raw reconstruction-head output (VQ logits or pixels).
+        """
+        if not self.do_recon:
+            raise RuntimeError(
+                "reconstruct() requires a model built with do_recon=True (no decoder found).")
+
+        # Resolve the low-rank dense map from the factorized features.
+        if isinstance(sparse, dict):
+            features = sparse
+            if features.get("lowrank") is not None:
+                image_embedding = features["lowrank"]
+            else:
+                image_embedding = torch.bmm(features["spatial"], features["sparse"])
+        else:
+            if spatial is None:
+                raise ValueError(
+                    "reconstruct(sparse, spatial) needs `spatial` when `sparse` is a "
+                    "tensor; alternatively pass the dict returned by encode().")
+            image_embedding = torch.bmm(spatial, sparse)    # B x num_patch x embedding_dim
+
+        decoder_output = self.forward_decoder(image_embedding)
+        out = {}
+
+        if self.tokenizer is not None:
+            # VQ path: head predicts codebook logits -> token ids -> VQGAN pixels
+            logits = self.reconstruction_head(decoder_output)       # B x P x vocab
+            tokens = logits.argmax(dim=-1)                          # B x P
+            out["logits"] = logits
+            out["tokens"] = tokens
+            out["reconstruction"] = self.tokenizer.decode(tokens)   # B x 3 x H x W in [0,1]
+        else:
+            # direct pixel head
+            bs, n, c = decoder_output.shape
+            h = w = int(n ** 0.5)
+            pixels = self.reconstruction_head(
+                decoder_output.permute(0, 2, 1).reshape(bs, c, h, w))   # B x 3 x H x W
+            out["logits"] = pixels
+            out["reconstruction"] = pixels
+
+        return out
+
+    def forward(self, inputs: dict):
+        """Training forward: run the full self-supervised pipeline and return losses.
+
+        For inference, use :meth:`encode` (features) or :meth:`reconstruct` (decoder)
+        instead of calling the model directly.
+        """
+        image = inputs["image"]
+
+        # base features shared by every training objective
+        predictions = self.encode(image)
+        sparse = predictions["sparse"]
+        cls_embed = predictions["cls"]
+        image_embedding = predictions["lowrank"]
+
         predictions["gold_labels"] = inputs["labels"]
-        
+
         if self.do_koleo:
             # Kozachenko-Leonenko loss
             predictions["koleo_loss"] = 0.1 * self.koleo_loss(sparse)
-            
+
         # decode the image
         if self.do_recon:
             decoder_output = self.forward_decoder(image_embedding)
             # reconstruct the image
             reconstruction_output = self.image_reconstruction(decoder_output, image)
-            predictions.update(reconstruction_output)        
+            predictions.update(reconstruction_output)
 
         if not self.do_clustering:
             return {'predictions': predictions}
 
         ### Online clustering
         global_views = inputs["global_views"][:, :self.num_masks]    # B x n_global x C x H x W
-        # global_views = inputs["global_views"][:, :1].expand(-1, self.num_masks, -1, -1, -1)
         bs, n_global, C, H, W = global_views.shape
         global_views = global_views.flatten(0, 1)    # B*n_global x C x H x W
         if self.color_augmentation:
             global_views = random_color_blur(global_views)
         if self.momentum_teacher:
-            if mode == "train":
+            if self.training:
                 self.update_teacher()
             # Get teacher assignments for distillation targets
             with torch.no_grad():
@@ -504,6 +623,43 @@ class STELLARModel(nn.Module):
                 cls_logits = self.cls_cluster_head(cls_embed, do_sinkhorn=False)[0]    # B*2 x num_clusters
                 predictions["cls_clustering_loss"] = self.contrastive_loss(
                     cls_logits, cls_assignments)
+        elif self.do_global_align:
+            # Recipe: align a second global crop (DINO-style cross-view self-distillation).
+            # Each view's Sinkhorn assignments are the target for the other view's prediction.
+            view2 = global_views.view(bs, n_global, C, H, W)[:, 1]
+            cls_embed2, sparse2, _ = self.forward_image(view2)
+
+            # Per-view cluster targets (Sinkhorn assignments, detached inside the head)
+            _, assign1, _ = self.clustering_head(sparse)
+            _, assign2, _ = self.clustering_head(sparse2)
+
+            # Match view-2 slots to view-1 slots, then cross-predict
+            idx2to1, _ = self.match_tokens(sparse2, sparse.detach())
+            if idx2to1 is not None:
+                assign2_matched = torch.gather(
+                    assign2, dim=1,
+                    index=idx2to1.unsqueeze(-1).expand(-1, -1, self.num_clusters))
+            else:
+                assign2_matched = assign2
+            logits1 = self.clustering_head(sparse, do_sinkhorn=False)[0]
+            logits2 = self.clustering_head(sparse2, do_sinkhorn=False)[0]
+            predictions["clustering_loss"] = (
+                self.contrastive_loss(logits1, assign2_matched) +
+                self.contrastive_loss(logits2, assign1, idx2to1)) / 2
+
+            # View-1 assignments are the target for the masked / local views below
+            assignments = assign1
+            sparse_tgt = sparse.detach()
+
+            if self.do_cls:
+                _, cls_assign1, _ = self.cls_cluster_head(cls_embed)
+                _, cls_assign2, _ = self.cls_cluster_head(cls_embed2)
+                cls_logits1 = self.cls_cluster_head(cls_embed, do_sinkhorn=False)[0]
+                cls_logits2 = self.cls_cluster_head(cls_embed2, do_sinkhorn=False)[0]
+                predictions["cls_clustering_loss"] = (
+                    self.contrastive_loss(cls_logits1, cls_assign2) +
+                    self.contrastive_loss(cls_logits2, cls_assign1)) / 2
+                cls_assignments = cls_assign1
         else:
             logits, assignments, clustering_loss = self.clustering_head(sparse)
             if self.do_cls:
@@ -539,7 +695,7 @@ class STELLARModel(nn.Module):
             cls_local, _, _ = self.forward_image(aug_views)    # B*num_local_crops x num_sparse_tokens x embedding_dim
             cls_logits_local, _, _ = self.cls_cluster_head(
                 cls_local, do_sinkhorn=False)
-            predictions["cls_loss"] += self.contrastive_loss(
+            predictions["cls_loss"] = predictions.get("cls_loss", 0) + self.contrastive_loss(
                 cls_logits_local, cls_assignments)
             
         return {'predictions': predictions}

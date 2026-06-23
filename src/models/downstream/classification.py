@@ -53,12 +53,12 @@ class ClassificationProbing(nn.Module):
                 if self.is_baseline:
                     predictions = self.model(inputs['image'])
                 else:
-                    predictions = self.model(inputs, mode='eval')["predictions"]
+                    predictions = self.model.encode(inputs)
         else:
             if self.is_baseline:
                 predictions = self.model(inputs['image'])
             else:
-                predictions = self.model(inputs, mode='eval')["predictions"]
+                predictions = self.model.encode(inputs)
         feature = predictions[self.feature_key]
         embedding = feature.mean(dim=1)
         embedding = self.normalize(embedding)

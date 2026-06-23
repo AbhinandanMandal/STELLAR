@@ -26,7 +26,7 @@ class STELLAR_Evaluator(BaseOlympusEvaluator[STELLAR_Predictions]):
     def predict(self, model: torch.nn.Module, batch: dict) -> STELLAR_Predictions:
         # given a model and a batch, return the model's predictions as a custom
         # ResultType
-        outputs = model(batch, mode='valid')
+        outputs = model(batch)
         predictions = outputs["predictions"]
 
         # x_hat = predictions["x_hat"]

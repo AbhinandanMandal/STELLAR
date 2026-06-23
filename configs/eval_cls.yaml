@@ -37,10 +37,7 @@ model:
   feature_dim: 768
   is_baseline: False
   model:
-    # _target_: src.models.baseline_model.baseline_model.BaselineiBOT
-    # model_name: ibot_vitb16
-    # ckpt_root: "${mounts.external}/PretrainedModels/vision_models"
-    _target_: src.models.stellar.stellar_model.STELLARModel
+    _target_: src.models.stellar_model.STELLARModel
     num_sparse_tokens: 16
     num_decoder_layers: 6
     spatial_temp: 0.06

@@ -42,8 +42,13 @@ model:
   num_decoder_layers: 6
   vq_model: "${mounts.external}/PretrainedModels/vqgan/maskgit/maskgit-vqgan-imagenet-f16-256.bin"
   do_cls: True
+  # --- second global view alignment (recommended for from-scratch training) ---
+  do_global_align: True
+  # --- momentum teacher (optional; enable for longer schedules / fine-tuning) ---
   momentum_teacher: False
   teacher_momentum: 0.996
+  teacher_momentum_final: null           # e.g. 1.0 to enable cosine momentum scheduling
+  teacher_momentum_schedule_steps: null  # total optimizer steps (≈ epochs * steps_per_epoch)
   # clustering
   do_clustering: True
   num_clusters: 16384
@@ -63,6 +68,14 @@ model:
   
 loss:
   reg_coeff: 1.0
+
+# Lightning callbacks (Olympus instantiates these and passes them to the Trainer).
+# The momentum-schedule callback is a no-op unless model.momentum_teacher=True;
+# it keeps the cosine momentum schedule correct across training resumes.
+callbacks:
+  momentum_schedule:
+    _target_: src.callbacks.momentum_schedule.MomentumScheduleCallback
+    auto_schedule_steps: True
 
 olympus_checkpoint:
   load_checkpoint: False
