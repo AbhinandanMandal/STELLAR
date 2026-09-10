@@ -11,11 +11,11 @@ defaults:
 # Definitions sub-configs rely on. These will only work if running from amlt, override
 # on command line otherwise
 mounts:
-  external: ${oc.env:EXTERNAL}
-  output: ${oc.env:OUTPUT}
+  external: ${oc.env:EXTERNAL,external}
+  output: ${oc.env:OUTPUT,outputs}
 project_name: stellar
-experiment_name: ${oc.env:AMLT_EXPERIMENT_NAME}
-job_name: ${oc.env:AMLT_JOB_NAME}
+experiment_name: ${oc.env:AMLT_EXPERIMENT_NAME,local}
+job_name: ${oc.env:AMLT_JOB_NAME,eval_seg}
 experiment_output_dir: ${mounts.output}/${project_name}/${job_name}
 
 datamodule:
@@ -39,20 +39,13 @@ model:
   feature_dim: 768
   is_baseline: False
   model_backbone:
-    _target_: src.models.stellar_model.STELLARModel
-    num_sparse_tokens: 16
-    num_decoder_layers: 6
-    vq_model: "${mounts.external}/PretrainedModels/vqgan/maskgit/maskgit-vqgan-imagenet-f16-256.bin"
-    do_cls: True
-    do_recon: True
-    momentum_teacher: False
-    teacher_momentum: 0.996
-    do_clustering: True
-    num_clusters: 16384
-    predictor_layers: 2
-    prototype_dim: 256
-    vit_pretrained: "facebook/vit-mae-base"
-    model_checkpoint_path: "${mounts.external}/PretrainedModels/STELLAR-B16.ckpt"
+    _target_: load_stellar.load_stellar
+    model: stellar-b16
+    revision: 6794be9a20fb9d3944c5bcc6003512a347fa518f
+
+olympus_checkpoint:
+  load_checkpoint: False
+  loader: null
 
 trainer:
   max_epochs: 80

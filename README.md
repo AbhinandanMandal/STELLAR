@@ -1,11 +1,15 @@
 # STELLAR: Learning Sparse Visual Representations via Spatial–Semantic Factorization
 
 [![Paper](https://img.shields.io/badge/Paper-arXiv-b31b1b.svg)](https://arxiv.org/abs/2602.01905)
-[![Venue](https://img.shields.io/badge/ICML-2026-blue.svg)](https://icml.cc/)
+[![ICML Paper](https://img.shields.io/badge/ICML-2026-blue.svg)](https://openreview.net/pdf?id=ysOOfySED6)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![BibTeX](https://img.shields.io/badge/Cite-BibTeX-orange.svg)](#citation)
 
-> **STELLAR** learns a **unified sparse visual representation** that supports both **reconstruction** (2.60 FID) and **semantics** (79.10% linear-probing accuracy) — using only **16 tokens**, a **90% reduction** in latent size compared to a dense grid.
+> **How many tokens are needed for one image?**
+> We show that with a **spatial–semantic factorized representation**, **16 semantic tokens**
+> paired with explicit spatial maps are enough for strong **image recognition and reconstruction**.
+> STELLAR-H achieves **2.60 reconstruction FID** and **79.10% ImageNet linear-probing accuracy**,
+> using approximately **90% fewer latent values** than a dense grid when counting both factors.
 
 <p align="center">
   <img src="images/factorization.svg" alt="Spatial–semantic factorization" width="760">
@@ -19,12 +23,27 @@ By factorizing **"what"** (semantics) from **"where"** (spatial layout), STELLAR
 
 ---
 
+## Start here
+
+| Your goal | Start with | What is available |
+| :--- | :--- | :--- |
+| Extract compact visual features | [Quick start](#quick-start-extract-features) | Five public pretrained models; encoder-only loading |
+| Train or evaluate on your data | [Training and evaluation guide](docs/usage.md) | Image folders, seeded runs, checkpoint resume, DDP |
+
+[Verification ledger](docs/verification.md) ·
+[Hugging Face models](https://huggingface.co/microsoft/STELLAR)
+
 ## Highlights
 
 - **Sparse & unified** — one set of 16 tokens serves both high-level semantics and pixel-level reconstruction.
 - **Factorized latents** — disentangles semantic content from spatial location, so each token captures a concept and *where* it appears.
 - **Strong on both axes** — competitive FID/LPIPS for reconstruction *and* DINO-level linear probing / kNN for semantics.
-- **Easy to train** — single config, runs from scratch on ImageNet-1K or any custom image folder.
+- **Reusable representation** — use semantic tokens for compact downstream interfaces and retain spatial maps when layout matters.
+- **Local or distributed training** — a MAE-initialized main recipe, optional random initialization, and label-free custom image folders.
+
+The small output representation does **not** imply a 90% encoder speedup: the ViT
+still processes dense image patches. Tokens are learned concepts, not guaranteed
+objects or language-aligned embeddings.
 
 ### Unified representation
 
@@ -51,7 +70,7 @@ A lightweight 6-layer ViT decoder trained on **frozen** STELLAR features handles
 ## Method
 
 STELLAR encodes an image into a small set of **latent queries** that become
-**sparse tokens**. Each token is factorized into a **localization** matrix `L`
+**sparse tokens**. The representation is factorized into a **localization** matrix `L`
 (*where* a concept appears, `n × r`) and a **semantics** matrix `S` (*what* the
 concept is, `r × d`). Their low-rank product reassembles a dense feature map that
 a lightweight decoder reconstructs, while the sparse tokens themselves carry the
@@ -82,9 +101,13 @@ cd STELLAR
 conda create -n stellar python=3.10.14
 conda activate stellar
 
-python -m pip install -U "pip<24.1"
-pip install -r requirements.txt
+python -m pip install -r requirements-inference.txt
 ```
+
+This is enough for feature extraction and reconstruction model loading. Run from
+the repo root so `load_stellar` and `src` are importable. For training, follow the
+[training dependency instructions](docs/usage.md#install-only-what-you-need).
+No Azure account is required for local runs.
 
 ### External directory
 
@@ -96,7 +119,7 @@ Create one external directory to hold datasets and pretrained weights. We refer 
 │   └── ImageNet/                # ImageNet-1K (see Data preparation)
 └── PretrainedModels/
     ├── vqgan/maskgit/           # MaskGIT-VQGAN tokenizer (for reconstruction)
-    └── stellar/                 # STELLAR checkpoints (.ckpt)
+    └── stellar/                 # optional checkpoints from your own training
 ```
 
 You can point the code at it on the command line with `mounts.external=<EXTERNAL>`.
@@ -126,25 +149,17 @@ STELLAR produces a small set of sparse tokens per image. For feature extraction 
 
 ```python
 import torch
-from huggingface_hub import hf_hub_download
-from safetensors.torch import load_file
-from src.models.stellar_model import STELLARModel
+from load_stellar import load_stellar
+from examples.common import read_image
 
-# Download the feature-extraction weights from the Hub.
-weights = hf_hub_download("microsoft/STELLAR", "stellar-b16.safetensors")
-
-# Build an encoder-only model and load the weights (non-strict: unused heads are skipped).
-model = STELLARModel(
-    num_sparse_tokens=16,
-    vit_pretrained="facebook/vit-mae-base",
-    do_recon=False,
-    do_clustering=False,
-    vq_model=None,
+model = load_stellar(
+  "stellar-b16",
+  revision="6794be9a20fb9d3944c5bcc6003512a347fa518f",
+  device="cpu",                        # or "cuda"
 )
-model.load_state_dict(load_file(weights), strict=False)
-model.eval()
 
-image = torch.rand(1, 3, 224, 224)          # values in [0, 1]
+image = read_image("your_image.jpg").unsqueeze(0)  # RGB in [0, 1]
+image = image.to(next(model.parameters()).device)
 with torch.no_grad():
     out = model.encode(image)
 
@@ -162,15 +177,19 @@ out["dense"]     # (1, 196, 768) dense patch features
 | `dense` | `(B, P, D)` | dense per-patch features |
 | `lowrank` | `(B, P, D)` | reassembled dense map (reconstruction input) |
 
+`K` is the sparse-token count. At 224x224 input, B/L have `P=196`; H/14 has
+`P=256`. Embedding widths are 768/1024/1280 for B/L/H. ImageNet normalization is
+applied **inside** the model. The loader checks every required weight, supports
+`local_files_only=True`, and does not download a second MAE backbone.
+
 > The released checkpoints include the decoder and clustering heads too. For image
 > reconstruction, `model.reconstruct(features)` is the decoder half of STELLAR — pass the
 > factorized features from `model.encode(image)` (or `model.reconstruct(sparse, spatial)`)
 > and it runs low-rank dense map → ViT decoder → VQGAN decoder, returning
-> `out["reconstruction"]` as `(B, 3, H, W)` RGB pixels in `[0, 1]` (build with
-> `do_recon=True` and `vq_model=<maskgit-vqgan path>`). For continued pretraining build the
-> full model and train via `model(batch)`. See the
-> [model card](https://huggingface.co/microsoft/STELLAR) for the
-> `load_stellar(..., purpose=...)` helper and an end-to-end reconstruction demo.
+> `out["reconstruction"]` as `(B, 3, H, W)` RGB pixels in `[0, 1]`. Load with
+> `load_stellar(purpose="reconstruct", vq_model=...)`; use `purpose="pretrain"`
+> for the full training model. H/14 reconstruction is 256x256; B/L reconstruction
+> is 224x224. See [the complete guide](docs/usage.md#reconstruction).
 
 ---
 
@@ -190,7 +209,19 @@ ImageNet/
 
 ### Custom dataset
 
-STELLAR is fully self-supervised — it needs only images. To train on your own data, point the dataset at a folder of images. The simplest path is to reuse the ImageNet layout (one subfolder per "class"; labels are ignored during pretraining), or implement a small `Dataset` in [src/datasets/](src/datasets/) that returns the same dictionary keys:
+STELLAR is fully self-supervised: it needs only images. The provided
+[ImageFolderSSL](src/datasets/image_folder.py) reads flat or nested image folders
+without labels, class subdirectories or ImageNet metadata:
+
+```bash
+python run.py --config-name stellar datamodule=image_folder \
+  scratch.data_root=/path/to/train_images \
+  scratch.test_data_root=/path/to/held_out_images \
+  mounts.external=<EXTERNAL> datamodule.dataloaders.train.batch_size=16
+```
+
+For another data source, implement a `Dataset` in [src/datasets/](src/datasets/)
+that returns the same dictionary keys:
 
 ```python
 {
@@ -207,13 +238,11 @@ See [src/datasets/imagenet_dataset.py](src/datasets/imagenet_dataset.py) for a r
 
 ## Pretraining
 
-Training is driven by [Hydra](https://hydra.cc/) configs under [configs/](configs/) and launched through the Olympus trainer:
+Training is driven by [Hydra](https://hydra.cc/) configs under [configs/](configs/).
+The local entry point seeds data splitting and wraps the Olympus/Lightning trainer:
 
 ```bash
-python -m azureml.acft.image.components.olympus.app.main \
-  --config-path $(pwd)/configs \
-  --config-name stellar \
-  mounts.external=<EXTERNAL>
+python run.py --config-name stellar mounts.external=<EXTERNAL> scratch.seed=42
 ```
 
 The main recipe lives in [configs/stellar.yaml](configs/stellar.yaml). Key knobs:
@@ -226,15 +255,21 @@ The main recipe lives in [configs/stellar.yaml](configs/stellar.yaml). Key knobs
 | `trainer.max_epochs` | training length |
 | `optimizer.lr` | learning rate |
 
-### Training recipes for from-scratch training
+The default is the **MAE-initialized B16 recipe**, with 150 epochs and learning
+rate 0.00015. The paper used a global batch of 2048 on 16 A100-80GB GPUs; the local
+default of one GPU does not reproduce that batch. See the
+[recipe and reproduction notes](docs/usage.md#pretraining-on-imagenet).
 
-Two optional recipes that improve from-scratch training are exposed as plain config flags:
+### Optional training extensions
+
+Two optional extensions are exposed as config flags. They are not benchmarked
+reproductions of the released models:
 
 **1. Second global-view alignment** (`model.do_global_align`)
 
 Encodes a second global crop and aligns the two views' cluster assignments
-(DINO-style cross-view self-distillation, with Hungarian matching between the
-sparse token slots). Recommended when training from scratch.
+(DINO-style cross-view self-distillation, with Sinkhorn-based set matching between
+the sparse token slots).
 
 ```yaml
 model:
@@ -256,9 +291,9 @@ model:
   teacher_momentum_schedule_steps: 90000
 ```
 
-Both recipes are off by default in the model for backward compatibility; the
-shipped [configs/stellar.yaml](configs/stellar.yaml) enables `do_global_align`
-for the from-scratch ImageNet recipe.
+Both extensions are off in the main recipe. Random initialization uses
+`model.vit_pretrained=null`; the paper's two-stage EMA warm-up protocol is
+described separately in [the guide](docs/usage.md#random-initialization-and-optional-extensions).
 
 ### Multi-GPU and resuming
 
@@ -267,10 +302,14 @@ devices (the Sinkhorn assignment and the EMA teacher are already
 distributed-aware and synchronized across ranks):
 
 ```bash
-python -m azureml.acft.image.components.olympus.app.main \
-  --config-path $(pwd)/configs --config-name stellar mounts.external=<EXTERNAL> \
+python run.py --config-name stellar mounts.external=<EXTERNAL> \
   trainer.devices=8 trainer.num_nodes=1
 ```
+
+Resume a complete training run with `scratch.resume=/path/to/last.ckpt`.
+See [multi-node launch and batch accounting](docs/usage.md#multi-gpu-and-multi-node)
+and [resume caveats](docs/usage.md#resume-and-repeatability). Gradient accumulation
+does not enlarge per-forward Sinkhorn assignment batches.
 
 When resuming, the model weights, optimizer state, and EMA teacher weights are
 restored from the checkpoint as usual. The momentum **schedule position** is
@@ -288,31 +327,33 @@ Frozen-feature evaluation configs are provided for the three reported tasks. Eac
 
 ```bash
 # Linear probing (classification)
-python -m azureml.acft.image.components.olympus.app.main \
-  --config-path $(pwd)/configs --config-name eval_cls mounts.external=<EXTERNAL>
+python run.py --config-name eval_cls mounts.external=<EXTERNAL>
 
 # Reconstruction (frozen-feature ViT decoder)
-python -m azureml.acft.image.components.olympus.app.main \
-  --config-path $(pwd)/configs --config-name eval_recon mounts.external=<EXTERNAL>
+python run.py --config-name eval_recon mounts.external=<EXTERNAL>
 
 # Semantic segmentation (ADE20K)
-python -m azureml.acft.image.components.olympus.app.main \
-  --config-path $(pwd)/configs --config-name eval_seg mounts.external=<EXTERNAL>
+python run.py --config-name eval_seg mounts.external=<EXTERNAL>
 ```
 
 Each eval config selects which feature to probe via `model.feature_key`
 (`sparse` for classification, `dense` for segmentation, `lowrank` for
-reconstruction). Set `model.model_checkpoint` (or `model_checkpoint_path`) to
-your downloaded `.ckpt`.
+reconstruction). They load the public Hub encoder by default and train a **new**
+head. To test a trained head, use `mode=test +scratch.resume=/path/to/probe.ckpt`.
+The [evaluation guide](docs/usage.md#frozen-feature-evaluation) covers dataset
+paths, model sizes, held-out splits and hyperparameter selection. A standalone
+[rFID/LPIPS command](docs/usage.md#reconstruction-metrics) evaluates the released
+reconstruction decoder; it does not silently claim Table 1 reproduction.
 
 ---
 
 ## Pretrained weights on Hugging Face
 
-The released encoder weights are hosted at
+The released weights are hosted at
 [huggingface.co/microsoft/STELLAR](https://huggingface.co/microsoft/STELLAR) as
-`safetensors` (feature-extraction only). The model card there lists every checkpoint
-and ships a `load_stellar.py` helper:
+`safetensors`, including the trained encoder, reconstruction and clustering
+modules (the external VQGAN is separate). The repo-local
+[load_stellar.py](load_stellar.py) selects which modules to build:
 
 ```python
 from load_stellar import load_stellar, list_models
@@ -325,6 +366,30 @@ Download via `huggingface_hub` / the helper above (not `git clone`) so that down
 are registered on the Hub.
 
 ---
+
+## Research connections
+
+STELLAR is a **self-supervised visual encoder and sparse visual token extractor**
+for research on compact, spatially grounded representations. Its
+**spatial-semantic factorization** retains semantic concept tokens together with
+the spatial maps needed for image reconstruction.
+
+- **Self-supervised learning (SSL):** frozen features support classification,
+  semantic segmentation and reconstruction, as evaluated in the paper.
+- **Vision-language models (VLMs) and visual token compression:** sparse tokens
+  provide a compact interface for learned multimodal adapters. Appendix B.3
+  evaluates alignment to a CLIP text tower. Researchers can feed `out["sparse"]`
+  into a learned adapter for their language model; no pretrained VLM adapter or
+  VLM speedup result is provided.
+- **Representation autoencoders (RAEs) and latent diffusion:** reconstructable
+  semantic features suggest a possible connection to
+  [RAE-style generative modeling](https://arxiv.org/abs/2510.11690).
+  **We have not conducted RAE-style image-generation experiments and make no
+  generation-quality claims.** Reconstruction needs both semantic and spatial
+  factors; reconstruction FID is not generation FID.
+- **World models and latent dynamics:** separating content from layout may be
+  useful for future video prediction research. Temporal consistency, action
+  conditioning and planning have not been evaluated in this work.
 
 ## Citation
 

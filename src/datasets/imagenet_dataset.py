@@ -42,12 +42,12 @@ class ImageNetKaggle(Dataset):
         with open(os.path.join(root, "ILSVRC2012_val_labels.json"), "rb") as f:
                     self.val_to_syn = json.load(f)
         samples_dir = os.path.join(root, "ILSVRC/Data/CLS-LOC", split)
-        for entry in os.listdir(samples_dir):
+        for entry in sorted(os.listdir(samples_dir)):
             if split == "train":
                 syn_id = entry
                 target = self.syn_to_class[syn_id]
                 syn_folder = os.path.join(samples_dir, syn_id)
-                for sample in os.listdir(syn_folder):
+                for sample in sorted(os.listdir(syn_folder)):
                     sample_path = os.path.join(syn_folder, sample)
                     self.samples.append(sample_path)
                     self.targets.append(target)
@@ -60,10 +60,10 @@ class ImageNetKaggle(Dataset):
     def __len__(self):
             return len(self.samples)
     def __getitem__(self, idx):
-            img = Image.open(self.samples[idx]).convert("RGB")
+            with Image.open(self.samples[idx]) as source:
+                img = source.convert("RGB")
             img = transforms.ToTensor()(img)  # Convert PIL image to tensor
             if self.pretraining:
-                x = self.transform(img).clamp(0.0, 1.0)  # Apply the normal transform
                 img_views = img.unsqueeze(0).expand(8, -1, -1, -1)
                 global_views = self.global_transform(img_views).clamp(0.0, 1.0)  # Apply the normal transform to all views
                 local_views = self.local_transform(img_views).clamp(0.0, 1.0)
