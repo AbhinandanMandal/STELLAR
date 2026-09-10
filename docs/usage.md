@@ -23,8 +23,21 @@ python -m pip install -r requirements-inference.txt
 
 The pip constraint accommodates legacy training-package metadata. The inference
 requirements pin the tested PyTorch/Transformers API versions; match the PyTorch
-CUDA wheel to your driver. See [verification.md](verification.md) for the actual
-tested environment and outstanding clean-install/benchmark verification.
+CUDA wheel to your driver. A fresh-machine installation of the legacy training
+stack and physical multi-GPU runs have not been validated.
+
+## Choose Your Config
+
+See the [configuration guide](../README.md#configuration-guide) for the main
+files and common overrides. Use `--config-name stellar` for pretraining,
+`eval_cls` for classification, `eval_seg` for segmentation, and `eval_recon`
+for reconstruction probing. The evaluation recipes train new heads on frozen
+pretrained features; they do not run the pretraining recipe.
+
+Edit the selected YAML or pass `key=value` overrides. Inspect the effective
+configuration before a run with `python run.py --config-name stellar --cfg job --resolve`.
+Hydra requires a `+` prefix when adding a key absent from that recipe, such as
+`+scratch.seed=42` for the evaluation configs.
 
 ## Weights And Inputs
 
@@ -132,8 +145,8 @@ The dataset recursively finds images in sorted order and returns two global
 crops and eight local crops. Labels are not consumed by SSL. Files must be valid
 RGB-convertible images; corrupt inputs fail visibly. Olympus holds out 10% of
 the training images using the seeded split. Use at least 20 images so validation
-is nonempty; the training split still needs full batches. Custom-domain SSL
-quality is not established by a successful smoke run.
+is nonempty; the training split still needs full batches. Evaluate learned
+features on held-out data to assess custom-domain quality.
 
 `scratch.test_data_root` is used only for explicit test runs or
 `scratch.test_after_fit=true`; keep it disjoint from training. For custom SSL,
@@ -255,6 +268,6 @@ This streaming, single-device CLI reports TorchMetrics/torch-fidelity Inception
 preprocessing and the released pretraining decoder. H references are resized to
 256 to match its output. It is not the separately finetuned B/L decoder from
 Table 1, and preprocessing/LPIPS-network choices must match before comparing
-numbers. Use the complete held-out set; FID on two smoke-test images is not
+numbers. Use the complete held-out set; FID on a handful of images is not
 statistically meaningful. Distributed sampling/metric aggregation is not
 implemented in this standalone CLI.

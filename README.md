@@ -30,7 +30,6 @@ By factorizing **"what"** (semantics) from **"where"** (spatial layout), STELLAR
 | Extract compact visual features | [Quick start](#quick-start-extract-features) | Five public pretrained models; encoder-only loading |
 | Train or evaluate on your data | [Training and evaluation guide](docs/usage.md) | Image folders, seeded runs, checkpoint resume, DDP |
 
-[Verification ledger](docs/verification.md) ·
 [Hugging Face models](https://huggingface.co/microsoft/STELLAR)
 
 ## Highlights
@@ -245,15 +244,47 @@ The local entry point seeds data splitting and wraps the Olympus/Lightning train
 python run.py --config-name stellar mounts.external=<EXTERNAL> scratch.seed=42
 ```
 
-The main recipe lives in [configs/stellar.yaml](configs/stellar.yaml). Key knobs:
+### Configuration guide
+
+Start with [configs/stellar.yaml](configs/stellar.yaml) for pretraining. Edit the
+recipe YAML or override individual values on the command line:
+
+| File | What to change |
+| :--- | :--- |
+| [configs/stellar.yaml](configs/stellar.yaml) | Data/output roots, backbone, token count, batch size, learning rate, epochs and resume |
+| [configs/datamodule/image_folder.yaml](configs/datamodule/image_folder.yaml) | Custom-image dataset setup and validation split; select with `datamodule=image_folder` |
+| [configs/trainer/stellar_trainer.yaml](configs/trainer/stellar_trainer.yaml) | Lightning defaults: devices, precision, distributed strategy and gradient clipping |
+| [configs/eval_cls.yaml](configs/eval_cls.yaml) | Classification probe: pretrained model, features, classes and training settings |
+| [configs/eval_seg.yaml](configs/eval_seg.yaml) | Segmentation probe: pretrained model, features, classes and training settings |
+| [configs/eval_recon.yaml](configs/eval_recon.yaml) | Reconstruction probe: pretrained model, decoder, tokenizer path and training settings |
+
+Values in the selected recipe override its imported defaults. Common overrides:
 
 | Config | Meaning |
 | :--- | :--- |
+| `mounts.external` / `mounts.output` | Dataset/weight root and output root |
+| `job_name` | Run name under the output root |
+| `scratch.data_root` / `scratch.test_data_root` | Train/test image folders when using `datamodule=image_folder` |
+| `model.vit_pretrained` | MAE backbone for pretraining (base, large or huge) |
 | `model.num_sparse_tokens` | number of sparse tokens (e.g. 16) |
 | `model.do_recon` | enable VQGAN reconstruction branch |
 | `model.do_clustering` | enable online clustering / self-distillation |
+| `model.vq_model` | Local MaskGIT-VQGAN weights for reconstruction |
+| `datamodule.dataloaders.train.batch_size` | Images per device per training step |
+| `datamodule.dataloaders.train.num_workers` | Data-loading workers per device |
+| `trainer.devices` / `trainer.num_nodes` | Devices per node and node count |
 | `trainer.max_epochs` | training length |
 | `optimizer.lr` | learning rate |
+| `scratch.seed` / `scratch.resume` | Random seed and full Lightning checkpoint to resume |
+
+```bash
+python run.py --config-name stellar mounts.external=/path/to/external \
+  trainer.devices=1 datamodule.dataloaders.train.batch_size=16 \
+  optimizer.lr=0.00015 job_name=my_run
+
+# Inspect the fully resolved config without loading data or starting training.
+python run.py --config-name stellar --cfg job --resolve
+```
 
 The default is the **MAE-initialized B16 recipe**, with 150 epochs and learning
 rate 0.00015. The paper used a global batch of 2048 on 16 A100-80GB GPUs; the local

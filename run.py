@@ -4,7 +4,6 @@ from pathlib import Path
 
 import hydra
 import lightning as lightning
-from omegaconf import OmegaConf
 
 
 def run_experiment(config):
@@ -30,9 +29,6 @@ def run_experiment(config):
 
 @hydra.main(config_path="configs", config_name="stellar", version_base="1.3")
 def main(config):
-    if config.get("scratch", {}).get("print_config", False):
-        print(OmegaConf.to_yaml(config, resolve=True))
-        return
     run_experiment(config)
 
 
