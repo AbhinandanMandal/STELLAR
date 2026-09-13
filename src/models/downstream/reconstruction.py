@@ -162,3 +162,4 @@ class ReconstructionProbing(nn.Module):
         reconstruction_output = self.image_reconstruction(decoder_output, image)
 
         return {'predictions': reconstruction_output}
+    
