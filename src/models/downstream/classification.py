@@ -44,6 +44,12 @@ class ClassificationProbing(nn.Module):
                 param.requires_grad = False
 
 
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_model:
+            self.model.eval()
+        return self
+
     def forward(self, inputs: dict):
         image = inputs["image"] if "image" in inputs else None
         if image is None:

@@ -1,0 +1,8 @@
+torch==2.10.0
+torchvision==0.25.0
+transformers==5.2.0
+huggingface-hub==1.4.1
+safetensors==0.7.0
+omegaconf>=2.3,<3
+einops>=0.8,<1
+pillow>=10

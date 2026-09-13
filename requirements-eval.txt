@@ -1,0 +1,3 @@
+-r requirements-inference.txt
+torchmetrics>=1.7,<2
+torch-fidelity==0.3.0
