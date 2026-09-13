@@ -129,3 +129,119 @@ def train_dense_probe(seed, num_epochs=50):
         "testB": testB_metrics,
         "history": history,
     }
+
+
+# Running for seed 42, 123, 2026
+def train_spatial_probe(feature_key, seed, num_epochs=50):
+    import random
+
+    # Training randomness
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # Fresh model
+    lowrank_model = SegmentationProbing(
+        model_backbone=model,
+        is_baseline=False,
+        feature_key="lowrank",
+        feature_dim=768,
+        num_classes=2,
+        freeze_backbone=True,
+        freeze_model=False,
+        resize_output=(224, 224),
+    ).to(device)
+
+    # Optimizer
+    optimizer = torch.optim.AdamW(
+        filter(
+            lambda p: p.requires_grad,
+            lowrank_model.parameters()
+        ),
+        lr=1e-3,
+        weight_decay=1e-4,
+    )
+
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # Best checkpoint in memory
+    best_val_dice = -1.0
+    best_epoch = -1
+    best_state = None
+
+    history = []
+
+    # Training
+    for epoch in range(num_epochs):
+
+        train_metrics = run_epoch(
+            lowrank_model,
+            probe_train_loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            device=device,
+        )
+
+        val_metrics = run_epoch(
+            lowrank_model,
+            probe_val_loader,
+            optimizer=None,
+            criterion=criterion,
+            device=device,
+        )
+
+        history.append({
+            "epoch": epoch + 1,
+            "train_dice": train_metrics["gland_dice"],
+            "train_miou": train_metrics["miou"],
+            "val_dice": val_metrics["gland_dice"],
+            "val_miou": val_metrics["miou"],
+        })
+
+        print(
+            f"[Seed {seed}] "
+            f"Epoch {epoch+1:02d}/{num_epochs} | "
+            f"Train Dice: {train_metrics['gland_dice']:.4f} | "
+            f"Val Dice: {val_metrics['gland_dice']:.4f}"
+        )
+
+        if val_metrics["gland_dice"] > best_val_dice:
+            best_val_dice = val_metrics["gland_dice"]
+            best_epoch = epoch + 1
+
+            best_state = {
+                k: v.detach().cpu().clone()
+                for k, v in lowrank_model.state_dict().items()
+            }
+
+    # Restore best model
+    lowrank_model.load_state_dict(best_state)
+    lowrank_model.eval()
+
+    # TestA
+    testA_metrics = run_epoch(
+        lowrank_model,
+        testA_loader,
+        optimizer=None,
+        criterion=criterion,
+        device=device,
+    )
+
+    # TestB
+    testB_metrics = run_epoch(
+        lowrank_model,
+        testB_loader,
+        optimizer=None,
+        criterion=criterion,
+        device=device,
+    )
+
+    return {
+        "seed": seed,
+        "best_epoch": best_epoch,
+        "best_val_dice": best_val_dice,
+        "testA": testA_metrics,
+        "testB": testB_metrics,
+        "history": history,
+    }
