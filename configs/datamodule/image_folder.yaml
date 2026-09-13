@@ -1,0 +1,16 @@
+defaults:
+  - dataloaders: default_dataloader
+  - _self_
+_target_: azureml.acft.image.components.olympus.core.OlympusDataModule
+split_train_validate: True
+validate_split_ratio: 0.1
+datasets:
+  _target_: azureml.acft.image.components.olympus.core.ModuleDatasets
+  train:
+    _target_: src.datasets.image_folder.ImageFolderSSL
+    _partial_: True
+    root: ${scratch.data_root}
+  test:
+    - _target_: src.datasets.image_folder.ImageFolderSSL
+      _partial_: True
+      root: ${scratch.test_data_root}

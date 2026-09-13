@@ -97,6 +97,14 @@ class ReconstructionProbing(nn.Module):
             for param in self.model.parameters():
                 param.requires_grad = False
 
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_model:
+            self.model.eval()
+        if self.tokenizer is not None:
+            self.tokenizer.eval()
+        return self
+
     def forward_decoder(self, embeddings):
         
         embeddings = self.decoder_proj(embeddings)    # B x num_patch x decoder_dim

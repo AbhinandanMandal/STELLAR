@@ -74,6 +74,12 @@ class SegmentationProbing(nn.Module):
             for param in self.parameters():
                 param.requires_grad = False
 
+    def train(self, mode=True):
+        super().train(mode if not self.freeze_model else False)
+        if self.freeze_backbone:
+            self.model_backbone.eval()
+        return self
+
     def forward(self, inputs: dict):
 
         if self.freeze_backbone:

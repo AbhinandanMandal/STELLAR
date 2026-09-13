@@ -8,7 +8,6 @@ from transformers import ViTConfig, ViTModel
 
 from .modules.position_embedding import PositionEmbeddingRandom
 from .modules.common import MLPBlock
-from .modules.titok import PretrainedTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +64,14 @@ class STELLARModel(nn.Module):
         # other configurations
         model_checkpoint_path=None,
         vit_pretrained=None,
+        vit_config=None,
     ):
         super().__init__()
 
+        if vit_config is not None and vit_pretrained is not None:
+            raise ValueError("Specify only one of vit_config and vit_pretrained")
         if vit_pretrained is None:
-            encoder_config = ViTConfig()
+            encoder_config = ViTConfig(**(vit_config or {}))
             self.encoder = ViTModel(encoder_config)
         else:
             self.encoder = ViTModel.from_pretrained(vit_pretrained)
@@ -139,6 +141,8 @@ class STELLARModel(nn.Module):
             else:
                 self.reconstruction_head = nn.Linear(
                     decoder_config.hidden_size, 1024)
+                from .modules.titok import PretrainedTokenizer
+
                 self.tokenizer = PretrainedTokenizer(vq_model)
                 self.tokenizer.eval().requires_grad_(False)
 

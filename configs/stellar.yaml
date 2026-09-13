@@ -16,6 +16,12 @@ mounts:
 project_name: stellar
 job_name: stellar_train
 experiment_output_dir: ${mounts.output}/${project_name}/${job_name}
+scratch:
+  seed: 42
+  resume: null
+  test_after_fit: False
+  data_root: null
+  test_data_root: null
 
 datamodule:
   dataloaders:
@@ -42,8 +48,8 @@ model:
   num_decoder_layers: 6
   vq_model: "${mounts.external}/PretrainedModels/vqgan/maskgit/maskgit-vqgan-imagenet-f16-256.bin"
   do_cls: True
-  # --- second global view alignment (recommended for from-scratch training) ---
-  do_global_align: True
+  # Optional extension; disabled for the MAE-initialized paper recipe.
+  do_global_align: False
   # --- momentum teacher (optional; enable for longer schedules / fine-tuning) ---
   momentum_teacher: False
   teacher_momentum: 0.996

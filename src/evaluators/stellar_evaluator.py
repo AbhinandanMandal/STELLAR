@@ -42,7 +42,7 @@ class STELLAR_Evaluator(BaseOlympusEvaluator[STELLAR_Predictions]):
         gold_labels = batch.get("image", None)
 
         predictions = STELLAR_Predictions(
-            predictions=predictions, labels=predictions["sparse"], gold_labels=gold_labels
+            predictions=predictions, labels=predictions.get("sparse", predictions.get("x_hat")), gold_labels=gold_labels
         )
         return predictions
 
@@ -76,10 +76,10 @@ class STELLAR_Evaluator(BaseOlympusEvaluator[STELLAR_Predictions]):
                 metrics[f"{feat_name}_accuracy"] = (pred == predictions.predictions["gold_labels"]).float().mean()
 
         # record cosine similarity between cls token and dense features
-        with torch.no_grad():
+        if "cls" in predictions.predictions and "dense" in predictions.predictions:
             metrics["cls_patch_cossim"] = F.cosine_similarity(
-                predictions.predictions["cls"], 
-                predictions.predictions["dense"], dim=-1).mean()
+            predictions.predictions["cls"].detach(),
+            predictions.predictions["dense"].detach(), dim=-1).mean()
 
         return metrics
 

@@ -27,7 +27,8 @@ class STELLAR_Loss(nn.Module):
             if "loss" in key:
                 reg_loss += predictions[key]
 
-        total_loss =  self.rec_coeff * recon_loss + self.reg_coeff * reg_loss
+        rec_coeff = 1.0 if self.rec_coeff is None else self.rec_coeff
+        total_loss = rec_coeff * recon_loss + self.reg_coeff * reg_loss
    
         return total_loss
     
