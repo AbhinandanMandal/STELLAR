@@ -91,3 +91,4 @@ class STELLAR_Evaluator(BaseOlympusEvaluator[STELLAR_Predictions]):
             for label, gold in zip(predictions.labels, predictions.gold_labels)
         ]
         return batch_outputs
+    
