@@ -30,3 +30,4 @@ class STELLAR_Loss(nn.Module):
         total_loss =  self.rec_coeff * recon_loss + self.reg_coeff * reg_loss
    
         return total_loss
+    
