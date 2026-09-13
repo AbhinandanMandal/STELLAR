@@ -1,5 +1,5 @@
 
-import torch 
+import torch
 from Hypothesis.STELLAR import STELLARModel
 from Hypothesis.SegmentationProbing import SegmentationProbing
 
@@ -28,5 +28,4 @@ def dense_model(model_backbone, is_baseline, feature_key, feature_dim, num_class
         freeze_model=False,
         resize_output=(224, 224),
     ).to(device)
-    return dense_model 
-
+    return dense_model
