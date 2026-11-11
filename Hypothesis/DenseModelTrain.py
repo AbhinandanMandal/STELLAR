@@ -16,7 +16,8 @@ for seed in [42, 123, 2026]:
     print("\n" + "=" * 70)
     print(f"STARTING DENSE PROBE — SEED {seed}")
     print("=" * 70)
-    dense_results[seed] = train_dense_probe(seed, dense_model(), train_loader(), val_loader(), optimizer, criterion, device, 50)
+    dense_results[seed] = train_dense_probe(seed, dense_model(
+    ), train_loader(), val_loader(), optimizer, criterion, device, 50)
 
 
 for seed, result in dense_results.items():
